@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gartenverein – Mitglieder & Verteiler</title>
+  <link rel="stylesheet" href="styles.css?v=1">
+</head>
+<body>
+
+  <!-- Login -->
+  <div id="login">
+    <form class="login-box" id="login-form" autocomplete="on">
+      <h1 id="login-titel">Gartenverein</h1>
+      <p>Mitglieder &amp; E-Mail-Verteiler</p>
+      <label for="li-email">E-Mail</label>
+      <input id="li-email" type="email" autocomplete="username" required>
+      <label for="li-pw">Passwort</label>
+      <input id="li-pw" type="password" autocomplete="current-password" required>
+      <div class="login-err" id="login-err"></div>
+      <button class="btn primary" type="submit" style="width:100%;margin-top:18px;padding:11px">Anmelden</button>
+    </form>
+  </div>
+
+  <!-- App -->
+  <div id="app">
+    <div class="topbar">
+      <span class="brand" id="brand">🌱 Gartenverein</span>
+      <span class="who" id="who"></span>
+      <button class="btn" style="background:rgba(255,255,255,.14);border:none;color:#fff" onclick="GV.logout()">Abmelden</button>
+    </div>
+    <div class="bar">
+      <button class="tab" id="tab-mitglieder" onclick="GV.show('mitglieder')">👥 Mitglieder</button>
+      <button class="tab" id="tab-verteiler" onclick="GV.show('verteiler')">✉️ Verteiler</button>
+      <input class="search" id="search" type="search" placeholder="Suchen …" oninput="GV.onSearch(this.value)">
+    </div>
+    <div class="body" id="view"></div>
+  </div>
+
+  <!-- Modal + Toasts -->
+  <div id="modal-bg"><div class="modal" id="modal-body"></div></div>
+  <div id="toasts"></div>
+
+  <!-- Firebase SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <script src="firebase-config.js?v=1"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>
