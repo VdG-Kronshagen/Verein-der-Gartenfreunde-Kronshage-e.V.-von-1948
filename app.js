@@ -119,16 +119,14 @@ function show(v){ _view=v; _q=''; const s=$('search'); if(s) s.value=''; render(
 function onSearch(v){ _q=String(v||'').toLowerCase().trim(); render(); }
 function render(){
   $('tab-mitglieder').classList.toggle('active', _view==='mitglieder');
+  if($('tab-parzellen')) $('tab-parzellen').classList.toggle('active', _view==='parzellen');
   $('tab-verteiler').classList.toggle('active', _view==='verteiler');
-  $('view').innerHTML = _view==='verteiler' ? viewVerteiler() : viewMitglieder();
+  $('view').innerHTML = _view==='verteiler' ? viewVerteiler() : _view==='parzellen' ? viewParzellen() : viewMitglieder();
 }
 
 // ── Mitglieder ─────────────────────────────────────────────────────
-function viewMitglieder(){
-  let arr=members();
-  if(_q) arr=arr.filter(m=>[m.name,m.funktion,m.email,m.tel,m.adresse,m.note,(m.parzellen||[]).map(p=>p.nr).join(' ')].map(x=>String(x||'').toLowerCase()).join(' ').includes(_q));
-  const anyMail=members().some(m=>m.email);
-  const cards=arr.map(m=>`<div class="card">
+function matchM(m){ return [m.name,m.funktion,m.email,m.tel,m.adresse,m.note,(m.parzellen||[]).map(p=>p.nr).join(' ')].map(x=>String(x||'').toLowerCase()).join(' ').includes(_q); }
+function memberCard(m){ return `<div class="card">
       <h3>${esc(m.name||'(ohne Name)')}</h3>
       ${m.funktion?`<div class="sub">${esc(m.funktion)}</div>`:''}
       <div class="links">
@@ -142,20 +140,58 @@ function viewMitglieder(){
         <button class="btn" onclick="GV.editMember('${m.id}')">Bearbeiten</button>
         <button class="x" title="Löschen" onclick="GV.askDelMember('${m.id}')">✕</button>
       </div>
-    </div>`).join('') || `<div class="muted">${_q?'Keine Treffer.':'Noch keine Mitglieder. Lege das erste an.'}</div>`;
+    </div>`; }
+function leftCard(m){ return `<div class="card">
+      <h3>${esc(m.name||'(ohne Name)')}</h3>
+      <div class="sub">🚪 ausgetreten${m.austrittsdatum?' am '+fmtDateShort(m.austrittsdatum):''}</div>
+      ${(m.parzellen&&m.parzellen.length)?`<div class="links" style="margin-top:8px">${m.parzellen.map(p=>`<span class="chip">🌳 ${esc(p.nr)} ${parzRange(p)}</span>`).join('')}</div>`:''}
+      <div class="actions">
+        <button class="btn" onclick="GV.editMember('${m.id}')">Ansehen</button>
+        <button class="x" title="Endgültig löschen (auch Name)" onclick="GV.askDelMember('${m.id}')">✕</button>
+      </div>
+    </div>`; }
+function viewMitglieder(){
+  let arr=members(); if(_q) arr=arr.filter(matchM);
+  const active=arr.filter(isAktiv), left=arr.filter(m=>!isAktiv(m));
+  const anyMail=members().filter(isAktiv).some(m=>m.email);
+  const cards=active.map(memberCard).join('') || `<div class="muted">${_q?'Keine aktiven Treffer.':'Noch keine Mitglieder. Lege das erste an.'}</div>`;
   return `<div class="sec">
-    <h2><span>👥 Mitglieder (${members().length})</span>
+    <h2><span>👥 Mitglieder (${members().filter(isAktiv).length})</span>
       <span style="display:flex;gap:8px;flex-wrap:wrap">
-        ${anyMail?`<button class="btn" title="Mail an alle (BCC)" onclick="GV.mailAlle()">✉️ Mail an alle</button>`:''}
+        ${anyMail?`<button class="btn" title="Mail an alle aktiven (BCC)" onclick="GV.mailAlle()">✉️ Mail an alle</button>`:''}
         <button class="btn primary" onclick="GV.newMember()">＋ Mitglied</button>
       </span></h2>
     <div class="list">${cards}</div>
+    ${left.length?`<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted);font-size:13px;font-weight:600">🚪 Ausgetretene Mitglieder (${left.length})</summary><div class="list" style="margin-top:10px">${left.map(leftCard).join('')}</div></details>`:''}
   </div>`;
 }
 function mailAlle(){
-  const emails=members().map(m=>m.email).filter(Boolean);
+  const emails=members().filter(isAktiv).map(m=>m.email).filter(Boolean);
   if(!emails.length){ toast('Keine E-Mail-Adressen hinterlegt.','err'); return; }
   openMail(emails,'bcc');
+}
+// ── Parzellen-Verlauf (aus allen Mitgliedern, inkl. ausgetretener) ──
+function viewParzellen(){
+  const map={};
+  members().forEach(m=>{ (m.parzellen||[]).forEach(p=>{ if(!p.nr) return; (map[p.nr]=map[p.nr]||[]).push({name:m.name||'?', von:p.von||'', bis:p.bis||''}); }); });
+  let nrs=Object.keys(map);
+  if(_q) nrs=nrs.filter(nr=>String(nr).toLowerCase().includes(_q) || map[nr].some(h=>String(h.name).toLowerCase().includes(_q)));
+  nrs.sort((a,b)=>{ const na=parseInt(a,10), nb=parseInt(b,10); if(!isNaN(na)&&!isNaN(nb)&&na!==nb) return na-nb; return String(a).localeCompare(String(b),'de',{numeric:true}); });
+  const cards=nrs.map(nr=>{
+    const hist=map[nr].slice().sort((a,b)=>String(a.von||'').localeCompare(String(b.von||'')));
+    const cur=hist.filter(h=>!h.bis).map(h=>h.name);
+    const rows=hist.map(h=>`<div class="parz-hist${!h.bis?' cur':''}"><span class="nm">${esc(h.name)}</span><span class="rg">${fmtDateShort(h.von)||'?'} – ${h.bis?fmtDateShort(h.bis):'heute'}</span></div>`).join('');
+    return `<div class="card">
+      <h3>🌳 Parzelle ${esc(nr)}</h3>
+      <div class="sub">${cur.length?('Aktuell: '+esc(cur.join(', '))):'aktuell frei'}</div>
+      <div style="margin-top:8px">${rows}</div>
+    </div>`;
+  }).join('') || `<div class="muted">${_q?'Keine Treffer.':'Noch keine Parzellen erfasst – trag sie bei den Mitgliedern ein.'}</div>`;
+  return `<div class="sec">
+    <h2><span>🌳 Parzellen-Verlauf</span></h2>
+    <div class="muted" style="margin-bottom:10px">Wer hatte welche Parzelle wann? Wird automatisch aus den Parzellen-Einträgen der Mitglieder gebildet (inkl. ausgetretener – Name bleibt, Rest gelöscht).</div>
+    <div class="list">${cards}</div>
+  </div>`;
 }
 function parzRowHtml(p){ p=p||{};
   return `<div class="parz-row">
@@ -172,7 +208,27 @@ function readParz(){
     bis:r.querySelector('.pz-bis').value||''
   })).filter(p=>p.nr).sort((a,b)=>String(a.von||'').localeCompare(String(b.von||'')));
 }
-function currentParz(m){ const ps=Array.isArray(m.parzellen)?m.parzellen:[]; const open=ps.filter(p=>!p.bis); if(open.length) return open[open.length-1].nr; return ps.length?ps[ps.length-1].nr:''; }
+function currentParz(m){ if(m.status==='ausgetreten') return ''; const ps=Array.isArray(m.parzellen)?m.parzellen:[]; const open=ps.filter(p=>!p.bis); if(open.length) return open[open.length-1].nr; return ''; }
+function fmtDateShort(s){ if(!s) return ''; const p=String(s).split('-'); return p.length===3?`${p[2]}.${p[1]}.${p[0]}`:String(s); }
+function parzRange(p){ return `(${fmtDateShort(p.von)||'?'} – ${p.bis?fmtDateShort(p.bis):'heute'})`; }
+function isAktiv(m){ return m.status!=='ausgetreten'; }
+// Austritt: persönliche Daten löschen, NUR Name + Parzellen-Verlauf behalten,
+// offene Parzellen mit dem Austrittsdatum schließen, Adresse aus Verteilern entfernen.
+function doAustritt(id){
+  const m=_cache.mitglieder[id]; if(!m) return;
+  const def=new Date().toISOString().slice(0,10);
+  const datum=prompt('Austrittsdatum (JJJJ-MM-TT).\nAchtung: Alle persönlichen Daten (E-Mail, Telefon, Adresse, Bankdaten) werden gelöscht – nur Name und Parzellen-Verlauf bleiben erhalten.', def);
+  if(datum===null) return;
+  const d=(String(datum).trim())||def;
+  const oldMail=String(m.email||'').toLowerCase().trim();
+  const parz=(Array.isArray(m.parzellen)?m.parzellen:[]).map(p=>({nr:p.nr, von:p.von||'', bis:p.bis||d}));
+  // Vollständig ersetzen → alle anderen Felder (Mail/Tel/Adresse/SEPA …) fallen weg
+  saveMember({ id:m.id, name:m.name, status:'ausgetreten', austrittsdatum:d,
+    eintrittsdatum:m.eintrittsdatum||'', parzellen:parz, createdAt:m.createdAt||Date.now() });
+  // Aus allen Verteilern entfernen
+  if(oldMail){ lists().forEach(v=>{ const cur=normEmails(v.emails); if(cur.some(e=>e.toLowerCase()===oldMail)) saveListe(Object.assign({},v,{emails:cur.filter(e=>e.toLowerCase()!==oldMail)})); }); }
+  closeModal(); render(); toast('Austritt eingetragen – persönliche Daten gelöscht.','ok');
+}
 function memberForm(m){
   const ls=lists();
   const myMail=String(m.email||'').toLowerCase().trim();
@@ -181,8 +237,10 @@ function memberForm(m){
         return `<label><input type="checkbox" class="m-vt" value="${esc(v.id)}" ${inIt?'checked':''}> ${esc(v.name||'(ohne Name)')}</label>`; }).join('')}</div>
      <div class="muted" style="margin-top:4px">Wirkt nur mit hinterlegter E-Mail.</div></div>` : '';
   return `<h3>${m.id?'✎ Mitglied':'＋ Mitglied'}</h3>
+   ${m.status==='ausgetreten'?`<div style="background:#fdecea;border:1px solid #f0bcb6;border-radius:8px;padding:8px 10px;margin-bottom:12px;color:#c0392b;font-size:13px">🚪 Ausgetreten${m.austrittsdatum?' am '+fmtDateShort(m.austrittsdatum):''} – persönliche Daten wurden gelöscht. Name &amp; Parzellen-Verlauf bleiben erhalten.</div>`:''}
    <div class="field"><label>Name *</label><input id="m-name" value="${esc(m.name||'')}"></div>
    <div class="field"><label>Funktion / Rolle</label><input id="m-funktion" value="${esc(m.funktion||'')}" placeholder="z. B. Vorstand, Kassenwart …"></div>
+   <div class="field"><label>Eintrittsdatum</label><input id="m-eintritt" type="date" value="${esc(m.eintrittsdatum||'')}"></div>
    <div class="field"><label>E-Mail</label><input id="m-email" type="email" value="${esc(m.email||'')}"></div>
    <div class="field"><label>Telefon</label><input id="m-tel" value="${esc(m.tel||'')}"></div>
    <div class="field"><label>Adresse</label><input id="m-adresse" value="${esc(m.adresse||'')}"></div>
@@ -206,7 +264,9 @@ function memberForm(m){
 
    <div class="field"><label>Notiz</label><textarea id="m-note" rows="2">${esc(m.note||'')}</textarea></div>
    ${vBlock}
-   <div class="actions-row"><button class="btn" onclick="GV.close()">Abbrechen</button>
+   <div class="actions-row">
+   ${(m.id && m.status!=='ausgetreten')?`<button class="btn danger" style="margin-right:auto" onclick="GV.doAustritt('${m.id}')">🚪 Austritt eintragen</button>`:''}
+   <button class="btn" onclick="GV.close()">Abbrechen</button>
    <button class="btn primary" onclick="GV.saveMemberForm('${m.id||''}')">${m.id?'Speichern':'Anlegen'}</button></div>`;
 }
 function newMember(){ openModal(memberForm({})); }
@@ -214,13 +274,15 @@ function editMember(id){ const m=_cache.mitglieder[id]; if(m) openModal(memberFo
 function saveMemberForm(id){
   const name=val('m-name'); if(!name){ toast('Bitte einen Namen eingeben.','err'); return; }
   const email=val('m-email');
-  const rec={ id:id||newId(), name, funktion:val('m-funktion'), email, tel:val('m-tel'), adresse:val('m-adresse'), note:val('m-note'),
+  const ex=id?_cache.mitglieder[id]:null;
+  const rec={ id:id||newId(), name, funktion:val('m-funktion'), eintrittsdatum:val('m-eintritt'),
+    email, tel:val('m-tel'), adresse:val('m-adresse'), note:val('m-note'),
     parzellen:readParz(),
     sepaAktiv:!!($('m-sepa')&&$('m-sepa').checked),
     kontoinhaber:val('m-inhaber'), iban:val('m-iban'), bic:val('m-bic'),
-    mandatsref:val('m-mref'), mandatsdatum:val('m-mdat') };
-  const ex=id?_cache.mitglieder[id]:null;
-  if(ex){ rec.createdAt=ex.createdAt; } else { rec.createdAt=Date.now(); }
+    mandatsref:val('m-mref'), mandatsdatum:val('m-mdat'),
+    createdAt:(ex&&ex.createdAt)||Date.now() };
+  if(ex&&ex.status==='ausgetreten'){ rec.status='ausgetreten'; rec.austrittsdatum=ex.austrittsdatum||''; }
   // Verteiler-Mitgliedschaft (vor close lesen)
   const want=new Set(Array.from(document.querySelectorAll('.m-vt:checked')).map(x=>x.value));
   const allBoxes=Array.from(document.querySelectorAll('.m-vt')).map(x=>x.value);
@@ -292,7 +354,7 @@ function verteilerCopy(id){ const v=_cache.verteiler[id]; if(v) copyText(normEma
 // ── Export für inline onclick ──────────────────────────────────────
 window.GV = {
   logout, show, onSearch, close:closeModal,
-  newMember, editMember, saveMemberForm, askDelMember, mailAlle,
+  newMember, editMember, saveMemberForm, askDelMember, mailAlle, doAustritt,
   addParz:()=>$('m-parz').insertAdjacentHTML('beforeend', parzRowHtml({})),
   delParz:(btn)=>{ const r=btn.closest('.parz-row'); if(r) r.remove(); },
   newListe, editListe, saveListeForm, askDelListe, listeAddMember, verteilerMail, verteilerCopy
