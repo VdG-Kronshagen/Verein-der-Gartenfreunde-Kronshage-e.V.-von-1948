@@ -50,7 +50,7 @@ function whoLabel(){ return (_user&&(_user.displayName||_user.email))||''; }
 // ── Firebase Init + Auth ───────────────────────────────────────────
 function init(){
   try{
-    if(window.APP_TITEL){ $('login-titel').textContent=window.APP_TITEL; $('brand').textContent='🌱 '+window.APP_TITEL; document.title=window.APP_TITEL+' – Mitglieder & Verteiler'; }
+    if(window.APP_TITEL){ $('login-titel').textContent=window.APP_TITEL; $('brand').textContent=window.APP_TITEL; document.title=window.APP_TITEL+' – Mitglieder & Verteiler'; }
     firebase.initializeApp(window.FIREBASE_CONFIG);
     firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
     firebase.auth().onAuthStateChanged(handleAuth);
