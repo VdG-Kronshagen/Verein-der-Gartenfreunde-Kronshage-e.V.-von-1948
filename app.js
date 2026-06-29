@@ -243,6 +243,7 @@ function viewMitglieder(){
           ${STATUS_OPTS.concat([['verstorben','Verstorben']]).map(([v,l])=>`<option value="${v}" ${_statusFilter===v?'selected':''}>${l}</option>`).join('')}
         </select>
         ${anyMail?`<button class="btn" title="Mail an alle aktiven (BCC)" onclick="GV.mailAlle()">✉️ Mail an alle</button>`:''}
+        <button class="btn" title="Mitglieder & Bankdaten per Excel" onclick="GV.impExp()">⇅ Import/Export</button>
         <button class="btn primary" onclick="GV.newMember()">＋ Mitglied</button>
       </span></h2>
     <div class="list">${cards}</div>
@@ -665,7 +666,7 @@ function verstossPdf(mid,vid){ const m=_cache.mitglieder[mid]; if(!m) return; co
    .stufe{display:inline-block;background:#fdecea;color:#c0392b;border:1px solid #f0bcb6;border-radius:6px;padding:3px 10px;font-weight:700;font-size:13px;margin-bottom:18px}
    @media print{body{margin:0}.noprint{display:none}}</style></head>
    <body>
-    <div class="head"><h1>${esc(c.vereinName||'Verein der Gartenfreunde Kronshagen e.V.')}</h1><div style="text-align:right;font-size:13px;color:#555">${esc(heute)}</div></div>
+    <div class="head"><h1>${esc(c.vereinName||'Verein der Gartenfreunde Kronshagen e.V. von 1946')}</h1><div style="text-align:right;font-size:13px;color:#555">${esc(heute)}</div></div>
     <div class="addr">${esc(m.name||'')}${m.adresse?'\n'+esc(m.adresse):''}</div>
     <div class="stufe">⚖️ Letzte Abmahnung – Verstoß gegen die Gartenordnung</div>
     <p>${body}</p>
@@ -692,7 +693,7 @@ const POSTEN_DEF={ pachtProM2:0.144, jahresbeitrag:60, gemeinschaft:45, wasserve
 function sepaCfg(){ const c=(_cache.meta&&_cache.meta.sepaCfg)||{}; const P=c.posten||{}; const po={};
   Object.keys(POSTEN_DEF).forEach(k=>{ po[k]=(P[k]!=null&&P[k]!=='')?num(P[k],POSTEN_DEF[k]):POSTEN_DEF[k]; });
   return {
-    glaeubigerId:c.glaeubigerId||'', vereinName:c.vereinName||'', iban:c.iban||'', bic:c.bic||'',
+    glaeubigerId:c.glaeubigerId||'', vereinName:String(c.vereinName||'').replace('1948','1946'), iban:c.iban||'', bic:c.bic||'',
     faelligkeit:c.faelligkeit||'', verwendung:c.verwendung||'Mitgliedsbeitrag',
     beitragsjahr:(c.beitragsjahr!=null&&c.beitragsjahr!=='')?c.beitragsjahr:new Date().getFullYear(),
     posten:po
@@ -773,7 +774,7 @@ function viewBeitraege(){
       <div class="field" style="flex:2;min-width:200px"><label>Gläubiger-ID *</label><input id="cfg-glid" value="${esc(c.glaeubigerId)}" placeholder="DE98ZZZ09999999999"></div>
       <div class="field" style="flex:1;min-width:120px"><label>Beitragsjahr</label><input id="cfg-jahr" type="number" step="1" value="${esc(c.beitragsjahr)}"></div>
     </div>
-    <div class="field"><label>Vereinsname (Gläubiger) *</label><input id="cfg-name" value="${esc(c.vereinName)}" placeholder="Verein der Gartenfreunde Kronshagen e.V."></div>
+    <div class="field"><label>Vereinsname (Gläubiger) *</label><input id="cfg-name" value="${esc(c.vereinName)}" placeholder="Verein der Gartenfreunde Kronshagen e.V. von 1946"></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <div class="field" style="flex:2;min-width:200px"><label>Vereins-IBAN *</label><input id="cfg-iban" value="${esc(c.iban)}" placeholder="DE.."></div>
       <div class="field" style="flex:1;min-width:110px"><label>Vereins-BIC</label><input id="cfg-bic" value="${esc(c.bic)}"></div>
@@ -1035,7 +1036,7 @@ function beitragPdf(id){ const m=_cache.mitglieder[id]; if(!m) return; const c=s
    .note{margin-top:22px;font-size:12px;color:#555;border-top:1px solid #eee;padding-top:10px}
    @media print{body{margin:0}.noprint{display:none}}</style></head>
    <body>
-    <div class="head"><h1>${esc(c.vereinName||'Verein der Gartenfreunde Kronshagen e.V.')}</h1><div style="text-align:right;font-size:13px;color:#555">${esc(heute)}</div></div>
+    <div class="head"><h1>${esc(c.vereinName||'Verein der Gartenfreunde Kronshagen e.V. von 1946')}</h1><div style="text-align:right;font-size:13px;color:#555">${esc(heute)}</div></div>
     <div class="addr">${esc(m.name||'')}${m.adresse?'\n'+esc(m.adresse):''}</div>
     <h1 style="font-size:18px;color:#222">Beitragsabrechnung ${esc(c.beitragsjahr)}</h1>
     <h2>Pflichtbeiträge</h2>
@@ -1052,6 +1053,156 @@ function beitragPdf(id){ const m=_cache.mitglieder[id]; if(!m) return; const c=s
   w.document.open(); w.document.write(html); w.document.close();
 }
 
+// ══════════════════════════════════════════════════════════════════
+//  Mitglieder & Bankdaten: Excel-Import / -Export
+// ══════════════════════════════════════════════════════════════════
+let _xlsxP=null;
+function loadXLSX(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  if(_xlsxP) return _xlsxP;
+  _xlsxP=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onload=()=>res(window.XLSX);
+    s.onerror=()=>{ _xlsxP=null; rej(new Error('Excel-Bibliothek konnte nicht geladen werden (Internet nötig).')); };
+    document.head.appendChild(s);
+  });
+  return _xlsxP;
+}
+function xlBool(v){ return ['ja','wahr','true','1','x','yes','y'].includes(String(v==null?'':v).toLowerCase().trim()); }
+function xlDate(v){
+  if(v==null||v==='') return '';
+  if(typeof v==='number'){ const d=new Date(Math.round((v-25569)*86400*1000)); if(!isNaN(d)) return d.toISOString().slice(0,10); }
+  const s=String(v).trim();
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if(m) return m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0');
+  m=s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/); if(m) return m[3]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[1]).padStart(2,'0');
+  return s;
+}
+function normIban(v){ return String(v==null?'':v).replace(/\s+/g,'').toUpperCase(); }
+const MEMBER_COLS=['id','name','status','email','tel','adresse','eintrittsdatum',
+  'kontoinhaber','iban','bic','mandatsref','mandatsdatum','sepaAktiv',
+  'flaeche','wasserverbrauch','gemeinschaftGeleistet','pforteCount','frostCount',
+  'note','parzellen','aemter','bezahltJahr','mahnStufe','mahnDatum'];
+function memberToRow(m){
+  const row={};
+  MEMBER_COLS.forEach(k=>{
+    let v;
+    if(k==='sepaAktiv'||k==='gemeinschaftGeleistet') v=m[k]?'ja':'nein';
+    else if(k==='parzellen'||k==='aemter') v=Array.isArray(m[k])&&m[k].length?JSON.stringify(m[k]):'';
+    else v=(m[k]!=null?m[k]:'');
+    row[k]=v;
+  });
+  row['Beitrag €']=moneyDE(memberBeitrag(m));   // Info-Spalte (beim Import ignoriert)
+  return row;
+}
+function impExp(){
+  openModal(`<h3>⇅ Mitglieder · Import / Export (Excel)</h3>
+   <div class="sec-head">⬇️ Export</div>
+   <div class="muted" style="margin-bottom:8px">Alle Mitglieder als Excel-Datei (eine Zeile je Mitglied, inkl. Bankdaten &amp; berechnetem Beitrag).</div>
+   <button class="btn primary" onclick="GV.exportMitglieder()">⬇️ Mitglieder exportieren</button>
+
+   <div class="sec-head" style="margin-top:18px">⬆️ Mitglieder importieren</div>
+   <div class="muted" style="margin-bottom:8px">Excel mit denselben Spalten. Zeilen werden anhand <b>id</b> aktualisiert; ohne id wird nach <b>Name</b> abgeglichen, sonst neu angelegt. Leere Zellen lassen bestehende Werte unverändert.</div>
+   <label class="btn" style="cursor:pointer">📄 Datei wählen…<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="GV.importMitglieder(this)"></label>
+
+   <div class="sec-head" style="margin-top:18px">🏦 Bankdaten importieren</div>
+   <div class="muted" style="margin-bottom:8px">Excel mit Spalten <b>name</b> (oder <b>id</b>) und <b>iban</b>, optional <b>bic, kontoinhaber, mandatsref, mandatsdatum</b>. Trifft auf bestehende Mitglieder (per id oder Name); setzt nur die Bankfelder, alles andere bleibt erhalten. Mit IBAN wird das SEPA-Mandat aktiviert.</div>
+   <label class="btn" style="cursor:pointer">🏦 Bankdaten-Datei wählen…<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="GV.importBankdaten(this)"></label>
+
+   <div id="ie-status" class="muted" style="margin-top:14px"></div>
+   <div class="actions-row"><button class="btn" onclick="GV.close()">Schließen</button></div>`, true);
+}
+function ieStatus(t){ const el=$('ie-status'); if(el) el.innerHTML=t||''; }
+async function exportMitglieder(){
+  ieStatus('Excel wird erstellt …');
+  try{
+    const XLSX=await loadXLSX();
+    const rows=members().map(memberToRow);
+    const ws=XLSX.utils.json_to_sheet(rows,{header:MEMBER_COLS.concat(['Beitrag €'])});
+    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Mitglieder');
+    const d=new Date(),p=n=>String(n).padStart(2,'0');
+    XLSX.writeFile(wb, `VdG-Mitglieder-${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}.xlsx`);
+    ieStatus(`Export erstellt: ${rows.length} Mitglieder.`);
+  }catch(e){ console.error(e); ieStatus('<span style="color:#c0392b">'+esc((e&&e.message)||e)+'</span>'); }
+}
+function findMemberByNameOrId(row){
+  const id=String(row.id||'').trim();
+  if(id && _cache.mitglieder[id]) return _cache.mitglieder[id];
+  const nm=String(row.name||'').toLowerCase().trim();
+  if(nm) return members().find(m=>String(m.name||'').toLowerCase().trim()===nm)||null;
+  return null;
+}
+async function importMitglieder(input){
+  const file=input&&input.files&&input.files[0]; if(!file) return;
+  if(!confirm('Mitglieder-Import starten? Vorhandene werden per id/Name aktualisiert, neue angelegt.')){ input.value=''; return; }
+  ieStatus('Datei wird gelesen …');
+  try{
+    const XLSX=await loadXLSX();
+    const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+    let created=0, updated=0, skipped=0;
+    rows.forEach(row=>{
+      if(!String(row.name||'').trim() && !String(row.id||'').trim()){ skipped++; return; }
+      const ex=findMemberByNameOrId(row);
+      const rec=Object.assign({}, ex||{});
+      if(!rec.id) rec.id=newId();
+      if(!rec.createdAt) rec.createdAt=Date.now();
+      const setIf=(k,v)=>{ if(v!=null && String(v).trim()!=='') rec[k]=v; };
+      setIf('name', row.name);
+      setIf('status', String(row.status||'').toLowerCase().trim());
+      setIf('email', row.email); setIf('tel', row.tel); setIf('adresse', row.adresse);
+      if(row.eintrittsdatum!=='') rec.eintrittsdatum=xlDate(row.eintrittsdatum);
+      setIf('kontoinhaber', row.kontoinhaber);
+      if(row.iban!=='') rec.iban=normIban(row.iban);
+      if(row.bic!=='') rec.bic=String(row.bic).replace(/\s+/g,'').toUpperCase();
+      setIf('mandatsref', row.mandatsref);
+      if(row.mandatsdatum!=='') rec.mandatsdatum=xlDate(row.mandatsdatum);
+      if(row.sepaAktiv!=='') rec.sepaAktiv=xlBool(row.sepaAktiv);
+      if(row.flaeche!=='') rec.flaeche=num(row.flaeche);
+      if(row.wasserverbrauch!=='') rec.wasserverbrauch=num(row.wasserverbrauch);
+      if(row.gemeinschaftGeleistet!=='') rec.gemeinschaftGeleistet=xlBool(row.gemeinschaftGeleistet);
+      if(row.pforteCount!=='') rec.pforteCount=num(row.pforteCount);
+      if(row.frostCount!=='') rec.frostCount=num(row.frostCount);
+      setIf('note', row.note);
+      if(row.bezahltJahr!=='') rec.bezahltJahr=parseInt(row.bezahltJahr,10)||rec.bezahltJahr;
+      if(row.mahnStufe!=='') rec.mahnStufe=parseInt(row.mahnStufe,10)||0;
+      if(row.mahnDatum!=='') rec.mahnDatum=xlDate(row.mahnDatum);
+      ['parzellen','aemter'].forEach(k=>{ if(String(row[k]||'').trim()){ try{ const a=JSON.parse(row[k]); if(Array.isArray(a)) rec[k]=a; }catch(e){} } });
+      saveMember(rec);
+      if(ex) updated++; else created++;
+    });
+    input.value=''; render();
+    ieStatus(`Import fertig: ${created} neu, ${updated} aktualisiert${skipped?`, ${skipped} übersprungen`:''}.`);
+    toast(`Import: ${created+updated} Mitglieder ✓`,'ok');
+  }catch(e){ console.error(e); ieStatus('<span style="color:#c0392b">'+esc((e&&e.message)||e)+'</span>'); }
+}
+async function importBankdaten(input){
+  const file=input&&input.files&&input.files[0]; if(!file) return;
+  if(!confirm('Bankdaten-Import starten? Bei passenden Mitgliedern werden IBAN/BIC/Mandat gesetzt.')){ input.value=''; return; }
+  ieStatus('Datei wird gelesen …');
+  try{
+    const XLSX=await loadXLSX();
+    const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+    let set=0; const unmatched=[];
+    rows.forEach(row=>{
+      const m=findMemberByNameOrId(row);
+      if(!m){ const nm=String(row.name||row.id||'').trim(); if(nm) unmatched.push(nm); return; }
+      const rec=Object.assign({}, m);
+      let any=false;
+      if(String(row.iban||'').trim()){ rec.iban=normIban(row.iban); rec.sepaAktiv=true; any=true; }
+      if(String(row.bic||'').trim()){ rec.bic=String(row.bic).replace(/\s+/g,'').toUpperCase(); any=true; }
+      if(String(row.kontoinhaber||'').trim()){ rec.kontoinhaber=String(row.kontoinhaber).trim(); any=true; }
+      if(String(row.mandatsref||'').trim()){ rec.mandatsref=String(row.mandatsref).trim(); any=true; }
+      if(String(row.mandatsdatum||'').trim()){ rec.mandatsdatum=xlDate(row.mandatsdatum); any=true; }
+      if(any){ saveMember(rec); set++; }
+    });
+    input.value=''; render();
+    ieStatus(`Bankdaten gesetzt für ${set} Mitglied(er).`+(unmatched.length?` <br><span style="color:#c0392b">Nicht zugeordnet (${unmatched.length}): ${esc(unmatched.slice(0,20).join(', '))}${unmatched.length>20?' …':''}</span>`:''));
+    toast(`Bankdaten: ${set} gesetzt ✓`,'ok');
+  }catch(e){ console.error(e); ieStatus('<span style="color:#c0392b">'+esc((e&&e.message)||e)+'</span>'); }
+}
+
 // ── Export für inline onclick ──────────────────────────────────────
 window.GV = {
   logout, show, onSearch, statusFilter, close:closeModal,
@@ -1061,6 +1212,7 @@ window.GV = {
   saveSepaCfg, exportSepa, mahnMail, mahnPdf, markBezahlt, resetMahn, beitragPrev, beitragPdf,
   saveRechnungsfuehrer, clearRechnungsfuehrer,
   newVerstoss, saveVerstoss, verstossMail, verstossPdf, verstossErledigt, verstossDel,
+  impExp, exportMitglieder, importMitglieder, importBankdaten,
   addParz:()=>$('m-parz').insertAdjacentHTML('beforeend', parzRowHtml({})),
   delParz:(btn)=>{ const r=btn.closest('.parz-row'); if(r) r.remove(); },
   addAmt:()=>$('m-amt').insertAdjacentHTML('beforeend', amtRowHtml({})),
