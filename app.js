@@ -46,6 +46,13 @@ let _view='mitglieder', _q='', _statusFilter='';
 function members(){ return Object.values(_cache.mitglieder||{}).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'de',{sensitivity:'base'})); }
 function lists(){ return Object.values(_cache.verteiler||{}).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'de',{sensitivity:'base'})); }
 function whoLabel(){ return (_user&&(_user.displayName||_user.email))||''; }
+// ── Rechnungsführer: Finanzdaten nur für ihn sichtbar ──────────────
+function myEmail(){ return String((_user&&_user.email)||'').toLowerCase().trim(); }
+function rechnungsfuehrer(){ return String((_cache.meta&&_cache.meta.rechnungsfuehrer)||'').toLowerCase().trim(); }
+// Solange kein Rechnungsführer festgelegt ist, sehen alle die Finanzdaten
+// (für die Ersteinrichtung). Danach nur noch der hinterlegte Rechnungsführer.
+function canSeeFinance(){ const rf=rechnungsfuehrer(); return !rf || myEmail()===rf; }
+function canManageRf(){ const rf=rechnungsfuehrer(); return !rf || myEmail()===rf; }
 
 // ── Firebase Init + Auth ───────────────────────────────────────────
 function init(){
@@ -182,9 +189,13 @@ function show(v){ _view=v; _q=''; const s=$('search'); if(s) s.value=''; render(
 function onSearch(v){ _q=String(v||'').toLowerCase().trim(); render(); }
 function statusFilter(v){ _statusFilter=v||''; render(); }
 function render(){
+  const fin=canSeeFinance();
+  // Beiträge-Tab nur für den Rechnungsführer (bzw. solange keiner gesetzt ist)
+  const tb=$('tab-beitraege'); if(tb) tb.style.display=fin?'':'none';
+  if(_view==='beitraege' && !fin) _view='mitglieder';
   $('tab-mitglieder').classList.toggle('active', _view==='mitglieder');
   $('tab-verteiler').classList.toggle('active', _view==='verteiler');
-  const tb=$('tab-beitraege'); if(tb) tb.classList.toggle('active', _view==='beitraege');
+  if(tb) tb.classList.toggle('active', _view==='beitraege');
   $('view').innerHTML = _view==='verteiler' ? viewVerteiler() : (_view==='beitraege' ? viewBeitraege() : viewMitglieder());
 }
 
@@ -201,7 +212,7 @@ function memberCard(m){ const amt=currentAmt(m), pz=currentParz(m);
         ${statusChip(m)}
         ${amt?`<span class="chip cur">🏅 ${esc(amt)}</span>`:''}
         ${pz?`<span class="chip">🌳 Parzelle ${esc(pz)}</span>`:''}
-        ${m.sepaAktiv?`<span class="chip">🏦 SEPA</span>`:''}
+        ${(canSeeFinance()&&m.sepaAktiv)?`<span class="chip">🏦 SEPA</span>`:''}
       </div>
     </div>`; }
 function leftCard(m){ return `<div class="card" style="cursor:pointer" onclick="GV.openMember('${m.id}')">
@@ -402,6 +413,7 @@ function memberForm(m){
    <button type="button" class="btn" onclick="GV.addAmt()">＋ Amt</button>
    <div class="muted" style="margin-top:4px">„bis" leer lassen = aktuelles Amt.</div>
 
+   ${canSeeFinance()?`
    <div class="sec-head" style="display:flex;justify-content:space-between;align-items:center">🏦 SEPA-Lastschrift <button type="button" class="btn" style="padding:4px 10px;font-size:12px" onclick="GV.copySepaForm()">⧉ Bankdaten kopieren</button></div>
    <label class="ck"><input type="checkbox" id="m-sepa" ${m.sepaAktiv?'checked':''}> SEPA-Lastschriftmandat erteilt</label>
    <div class="field"><label>Kontoinhaber <span style="font-weight:400;text-transform:none">(falls abweichend)</span></label><input id="m-inhaber" value="${esc(m.kontoinhaber||'')}"></div>
@@ -423,7 +435,7 @@ function memberForm(m){
      <div class="field" style="flex:1;min-width:150px"><label>Pforte nicht geöffnet (Anzahl Termine)</label><input id="m-pforte" type="number" step="1" min="0" value="${m.pforteCount?esc(m.pforteCount):''}" placeholder="0" oninput="GV.beitragPrev()"></div>
      <div class="field" style="flex:1;min-width:150px"><label>Ersetzte Wasseruhren (Frost)</label><input id="m-frost" type="number" step="1" min="0" value="${m.frostCount?esc(m.frostCount):''}" placeholder="0" oninput="GV.beitragPrev()"></div>
    </div>
-   <div id="m-beitrag-prev" class="beitrag-box">${beitragPrevHtml(m)}</div>
+   <div id="m-beitrag-prev" class="beitrag-box">${beitragPrevHtml(m)}</div>`:''}
 
    <div class="field"><label>Notiz</label><textarea id="m-note" rows="2">${esc(m.note||'')}</textarea></div>
    ${vBlock}
@@ -452,8 +464,8 @@ function memberDetailHtml(m){
    ${det('Notiz', m.note?esc(m.note):'')}
    ${det('🌳 Gartenparzellen (Verlauf)', parz)}
    ${det('🏅 Ämter (Verlauf)', aem)}
-   ${det('🏦 SEPA-Lastschrift', sepa)}
-   ${isAktiv(m)?`<div class="dt"><div class="dt-l">💶 Beitrag ${esc(sepaCfg().beitragsjahr)}</div><div class="dt-v"><div class="beitrag-box">${beitragTableHtml(m)}</div><button class="btn" style="margin-top:8px" onclick="GV.beitragPdf('${m.id}')">🧾 Abrechnung drucken</button></div></div>`:''}
+   ${canSeeFinance()?det('🏦 SEPA-Lastschrift', sepa):''}
+   ${(canSeeFinance()&&isAktiv(m))?`<div class="dt"><div class="dt-l">💶 Beitrag ${esc(sepaCfg().beitragsjahr)}</div><div class="dt-v"><div class="beitrag-box">${beitragTableHtml(m)}</div><button class="btn" style="margin-top:8px" onclick="GV.beitragPdf('${m.id}')">🧾 Abrechnung drucken</button></div></div>`:''}
    <div class="actions-row" style="margin-top:18px">
      <button class="btn" onclick="GV.close()">Schließen</button>
      <button class="btn primary" onclick="GV.editMember('${m.id}')">✎ Bearbeiten</button>
@@ -467,16 +479,23 @@ function saveMemberForm(id){
   const rec={ id:id||newId(), name, eintrittsdatum:eintritt,
     email, tel:val('m-tel'), adresse:val('m-adresse'), note:val('m-note'),
     parzellen:readParz(eintritt), aemter:readAemter(),
-    sepaAktiv:!!($('m-sepa')&&$('m-sepa').checked),
-    kontoinhaber:val('m-inhaber'), iban:val('m-iban'), bic:val('m-bic'),
-    mandatsref:val('m-mref'), mandatsdatum:val('m-mdat'),
     status: ($('m-status')&&$('m-status').value)||'aktiv',
-    flaeche: (val('m-flaeche')!==''? num(val('m-flaeche')) : ''),
-    wasserverbrauch: (val('m-wasser')!==''? num(val('m-wasser')) : ''),
-    gemeinschaftGeleistet: !!($('m-gemein')&&$('m-gemein').checked),
-    pforteCount: (val('m-pforte')!==''? num(val('m-pforte')) : ''),
-    frostCount: (val('m-frost')!==''? num(val('m-frost')) : ''),
     createdAt:(ex&&ex.createdAt)||Date.now() };
+  // Finanzdaten (SEPA + Beitrag) nur übernehmen, wenn das Formular sie zeigt
+  // (Rechnungsführer). Sonst die bestehenden Werte unverändert erhalten.
+  if(canSeeFinance()){
+    rec.sepaAktiv=!!($('m-sepa')&&$('m-sepa').checked);
+    rec.kontoinhaber=val('m-inhaber'); rec.iban=val('m-iban'); rec.bic=val('m-bic');
+    rec.mandatsref=val('m-mref'); rec.mandatsdatum=val('m-mdat');
+    rec.flaeche=(val('m-flaeche')!==''? num(val('m-flaeche')) : '');
+    rec.wasserverbrauch=(val('m-wasser')!==''? num(val('m-wasser')) : '');
+    rec.gemeinschaftGeleistet=!!($('m-gemein')&&$('m-gemein').checked);
+    rec.pforteCount=(val('m-pforte')!==''? num(val('m-pforte')) : '');
+    rec.frostCount=(val('m-frost')!==''? num(val('m-frost')) : '');
+  } else if(ex){
+    ['sepaAktiv','kontoinhaber','iban','bic','mandatsref','mandatsdatum','flaeche','wasserverbrauch','gemeinschaftGeleistet','pforteCount','frostCount']
+      .forEach(k=>{ if(ex[k]!=null) rec[k]=ex[k]; });
+  }
   // Bestehende Beitrags-/Mahn-Daten erhalten (werden in der Beiträge-Ansicht gepflegt)
   if(ex){ if(ex.bezahltJahr!=null) rec.bezahltJahr=ex.bezahltJahr; if(ex.mahnStufe!=null) rec.mahnStufe=ex.mahnStufe; if(ex.mahnDatum) rec.mahnDatum=ex.mahnDatum; if(ex.austrittsdatum&&isFormer(rec)) rec.austrittsdatum=ex.austrittsdatum; }
   // Verteiler-Mitgliedschaft (vor close lesen)
@@ -613,6 +632,20 @@ function viewBeitraege(){
   const sepaSum=sepaMembers.reduce((s,m)=>s+memberBeitrag(m),0);
   const overdue=all.filter(isOverdue).sort((a,b)=>(b.mahnStufe||0)-(a.mahnStufe||0)||String(a.name||'').localeCompare(String(b.name||''),'de'));
   const cfgOk = c.glaeubigerId && c.vereinName && c.iban;
+  // — Zugriff: Rechnungsführer —
+  const rf=rechnungsfuehrer();
+  const rfBox=`<div class="sec">
+    <h2><span>🔒 Zugriff Finanzdaten</span></h2>
+    <div class="dt"><div class="dt-l">Rechnungsführer</div><div class="dt-v">${rf?esc(rf):'<span class="muted">– noch nicht festgelegt: aktuell sehen alle die Finanzdaten –</span>'}</div></div>
+    ${canManageRf()
+      ? `<div class="muted" style="margin:8px 0">Trage die Login-E-Mail des Rechnungsführers ein. Danach sieht <b>nur</b> dieser Account den Beiträge-Bereich (SEPA, Mahnwesen, Beträge). Der Wechsel kann später nur vom aktuellen Rechnungsführer vorgenommen werden.</div>
+         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+           <div class="field" style="flex:2;min-width:220px"><label>E-Mail des Rechnungsführers</label><input id="cfg-rf" type="email" value="${esc(rf)}" placeholder="kassenwart@beispiel.de"></div>
+           <button class="btn primary" onclick="GV.saveRechnungsfuehrer()">Festlegen</button>
+           ${rf?`<button class="btn" onclick="GV.clearRechnungsfuehrer()">Freigeben (alle)</button>`:''}
+         </div>`
+      : `<div class="muted">Nur der aktuelle Rechnungsführer kann den Zugriff ändern.</div>`}
+  </div>`;
   // — Einstellungen —
   const P=c.posten;
   const posF=(id,label,v,step)=>`<div class="field" style="flex:1;min-width:150px"><label>${label}</label><input id="${id}" type="number" step="${step||'0.01'}" min="0" value="${esc(v)}"></div>`;
@@ -690,7 +723,21 @@ function viewBeitraege(){
     <div class="muted" style="margin-bottom:10px">Überfällig = aktives Mitglied ohne Zahlungseingang ${curYear()} nach Fälligkeit (${fmtDateShort(faelligDate())}). „Bezahlt" markiert den Beitrag ${curYear()} als beglichen und entfernt das Mitglied aus der Liste.</div>
     <div class="list">${mahnRows}</div>
   </div>`;
-  return settings + sepaSec + mahnSec;
+  return rfBox + settings + sepaSec + mahnSec;
+}
+function saveRechnungsfuehrer(){
+  if(!canManageRf()){ toast('Nur der aktuelle Rechnungsführer darf das ändern.','err'); return; }
+  const email=val('cfg-rf').toLowerCase().trim();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('Bitte eine gültige E-Mail eingeben.','err'); return; }
+  saveMeta({rechnungsfuehrer:email});
+  render();
+  toast(email===myEmail()?'Du bist jetzt der Rechnungsführer ✓':'Rechnungsführer festgelegt ✓','ok');
+}
+function clearRechnungsfuehrer(){
+  if(!canManageRf()){ toast('Nur der aktuelle Rechnungsführer darf das ändern.','err'); return; }
+  if(!confirm('Zugriff auf die Finanzdaten für ALLE freigeben (kein fester Rechnungsführer mehr)?')) return;
+  saveMeta({rechnungsfuehrer:''});
+  render(); toast('Finanzdaten-Zugriff freigegeben.','');
 }
 function saveSepaCfg(){
   const cfg={ glaeubigerId:val('cfg-glid').trim(), vereinName:val('cfg-name').trim(),
@@ -875,6 +922,7 @@ window.GV = {
   newMember, editMember, openMember, saveMemberForm, askDelMember, mailAlle, doArchive,
   copySepa, copySepaForm, amtPrev, manageAemter,
   saveSepaCfg, exportSepa, mahnMail, mahnPdf, markBezahlt, resetMahn, beitragPrev, beitragPdf,
+  saveRechnungsfuehrer, clearRechnungsfuehrer,
   addParz:()=>$('m-parz').insertAdjacentHTML('beforeend', parzRowHtml({})),
   delParz:(btn)=>{ const r=btn.closest('.parz-row'); if(r) r.remove(); },
   addAmt:()=>$('m-amt').insertAdjacentHTML('beforeend', amtRowHtml({})),
