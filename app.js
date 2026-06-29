@@ -276,10 +276,12 @@ function freieGaertenHtml(){
 }
 function parzRowHtml(p){ p=p||{};
   return `<div class="parz-row">
-    <input class="pz-nr" placeholder="Parzelle Nr." value="${esc(p.nr||'')}" data-von="${esc(p.von||'')}" data-bis="${esc(p.bis||'')}" style="flex:1;min-width:70px">
+    <input class="pz-nr" placeholder="Parzelle Nr." value="${esc(p.nr||'')}" data-von="${esc(p.von||'')}" data-bis="${esc(p.bis||'')}" oninput="GV.parzPrefill(this)" style="flex:1;min-width:70px">
     <button type="button" class="x" title="Zeile entfernen" onclick="GV.delParz(this)">✕</button>
   </div>`;
 }
+// Gespeicherte Größe (m²) je Parzellennummer (für Besitzerwechsel-Übernahme)
+function parzGroesse(nr){ const r=(_cache.meta&&_cache.meta.parzGroesse)||{}; const v=r[String(nr||'').trim()]; return (v!=null&&v!=='')?v:null; }
 // Datum automatisch: neue Parzelle bekommt das Eintrittsdatum als „von";
 // bestehende behalten ihr Datum; „bis" wird bei Austritt/Tod automatisch gesetzt.
 function readParz(eintritt){
@@ -435,7 +437,10 @@ function memberForm(m){
      <div class="field" style="flex:1;min-width:150px"><label>Pforte nicht geöffnet (Anzahl Termine)</label><input id="m-pforte" type="number" step="1" min="0" value="${m.pforteCount?esc(m.pforteCount):''}" placeholder="0" oninput="GV.beitragPrev()"></div>
      <div class="field" style="flex:1;min-width:150px"><label>Ersetzte Wasseruhren (Frost)</label><input id="m-frost" type="number" step="1" min="0" value="${m.frostCount?esc(m.frostCount):''}" placeholder="0" oninput="GV.beitragPrev()"></div>
    </div>
-   <div id="m-beitrag-prev" class="beitrag-box">${beitragPrevHtml(m)}</div>
+   <div class="sec-head" style="margin-top:6px;display:flex;justify-content:space-between;align-items:center">Posten berechnen <button type="button" class="btn" style="padding:3px 9px;font-size:11px;font-weight:600" onclick="GV.setFamilie()">👪 Familienmitglied</button></div>
+   <div class="muted" style="margin:-4px 0 6px;font-size:12px">Standard: alles berechnet. Bei Familienmitgliedern (Alibi-Parzelle) Garten-/Wasser-Posten abwählen – „👪 Familienmitglied" macht das mit einem Klick.</div>
+   <div class="pick">${BEITRAG_POSTEN.map(([k,l])=>`<label><input type="checkbox" class="m-post" value="${k}" ${postAktiv(m,k)?'checked':''} onchange="GV.beitragPrev()"> ${esc(l)}</label>`).join('')}</div>
+   <div id="m-beitrag-prev" class="beitrag-box" style="margin-top:10px">${beitragPrevHtml(m)}</div>
 
    <div class="field"><label>Notiz</label><textarea id="m-note" rows="2">${esc(m.note||'')}</textarea></div>
    ${vBlock}
@@ -493,9 +498,15 @@ function saveMemberForm(id){
     gemeinschaftGeleistet:!!($('m-gemein')&&$('m-gemein').checked),
     pforteCount:(val('m-pforte')!==''? num(val('m-pforte')) : ''),
     frostCount:(val('m-frost')!==''? num(val('m-frost')) : ''),
+    postenAus: formPostenAus()||(ex&&Array.isArray(ex.postenAus)?ex.postenAus:[]),
     createdAt:(ex&&ex.createdAt)||Date.now() };
   // Bestehende Beitrags-/Mahn-/Verstoß-Daten erhalten (werden anderswo gepflegt)
   if(ex){ if(ex.bezahltJahr!=null) rec.bezahltJahr=ex.bezahltJahr; if(ex.mahnStufe!=null) rec.mahnStufe=ex.mahnStufe; if(ex.mahnDatum) rec.mahnDatum=ex.mahnDatum; if(Array.isArray(ex.verstoesse)) rec.verstoesse=ex.verstoesse; if(ex.austrittsdatum&&isFormer(rec)) rec.austrittsdatum=ex.austrittsdatum; }
+  // Parzellengröße je Parzellennummer merken (für automatische Übernahme beim Besitzerwechsel)
+  const _fl=num(rec.flaeche,0);
+  if(_fl>0){ const reg=Object.assign({}, (_cache.meta&&_cache.meta.parzGroesse)||{});
+    (rec.parzellen||[]).forEach(p=>{ if(!p.bis && p.nr) reg[String(p.nr).trim()]=_fl; });
+    saveMeta({parzGroesse:reg}); }
   // Verteiler-Mitgliedschaft (vor close lesen)
   const want=new Set(Array.from(document.querySelectorAll('.m-vt:checked')).map(x=>x.value));
   const allBoxes=Array.from(document.querySelectorAll('.m-vt')).map(x=>x.value);
@@ -713,22 +724,33 @@ function curYear(){ return new Date().getFullYear(); }
 function rateDE(n){ return Number(n).toFixed(3).replace(/0+$/,'').replace(/[.,]$/,'').replace('.',',')+' €'; }
 // Beitrags-Zusammenstellung eines Mitglieds aus den einzelnen Posten.
 // Liefert {gruppe:'pflicht'|'sonder'|'extra', label, detail, amount}.
+// Auswählbare Posten (Reihenfolge = Anzeige). Standard: alle berechnet;
+// abgewählte Schlüssel liegen in m.postenAus (z. B. bei Familienmitgliedern).
+const BEITRAG_POSTEN=[
+  ['pacht','Pacht'],['jahresbeitrag','Jahresbeitrag'],['gemeinschaft','Gemeinschaftsarbeit'],
+  ['wasserverlust','Wasserverlust'],['pauschaleWasser','Pauschale Wasserversorgung'],
+  ['versicherung','Versicherungsgebühr'],['wasserzaehler','Wasserzählergebühr'],
+  ['wasserverbrauch','Wasserverbrauch'],['pforte','Pforte nicht geöffnet'],['frost','Frostschaden Wasseruhr']
+];
+// Posten, die ein „Familienmitglied" typischerweise NICHT zahlt (Garten/Wasser)
+const FAMILIE_AUS=['pacht','wasserverlust','pauschaleWasser','wasserzaehler','wasserverbrauch','pforte','frost'];
+function postAktiv(m,key){ const aus=Array.isArray(m.postenAus)?m.postenAus:[]; return !aus.includes(key); }
 function beitragPosten(m){
   const P=sepaCfg().posten; const out=[];
   const fl=num(m.flaeche,0);
-  if(fl>0) out.push({gruppe:'pflicht', label:'Pacht', detail:`${String(fl).replace('.',',')} m² × ${rateDE(P.pachtProM2)}`, amount:fl*P.pachtProM2});
-  out.push({gruppe:'pflicht', label:'Jahresbeitrag', detail:'', amount:P.jahresbeitrag});
-  if(!m.gemeinschaftGeleistet) out.push({gruppe:'pflicht', label:'Gemeinschaftsarbeit', detail:'', amount:P.gemeinschaft});
-  out.push({gruppe:'sonder', label:'Wasserverlust', detail:'', amount:P.wasserverlust});
-  out.push({gruppe:'sonder', label:'Pauschale Erneuerung der Wasserversorgung', detail:'', amount:P.pauschaleWasser});
-  out.push({gruppe:'sonder', label:'Versicherungsgebühr', detail:'', amount:P.versicherung});
-  out.push({gruppe:'sonder', label:'Wasserzählergebühr', detail:'', amount:P.wasserzaehler});
+  if(postAktiv(m,'pacht') && fl>0) out.push({gruppe:'pflicht', key:'pacht', label:'Pacht', detail:`${String(fl).replace('.',',')} m² × ${rateDE(P.pachtProM2)}`, amount:fl*P.pachtProM2});
+  if(postAktiv(m,'jahresbeitrag')) out.push({gruppe:'pflicht', key:'jahresbeitrag', label:'Jahresbeitrag', detail:'', amount:P.jahresbeitrag});
+  if(postAktiv(m,'gemeinschaft') && !m.gemeinschaftGeleistet) out.push({gruppe:'pflicht', key:'gemeinschaft', label:'Gemeinschaftsarbeit', detail:'', amount:P.gemeinschaft});
+  if(postAktiv(m,'wasserverlust')) out.push({gruppe:'sonder', key:'wasserverlust', label:'Wasserverlust', detail:'', amount:P.wasserverlust});
+  if(postAktiv(m,'pauschaleWasser')) out.push({gruppe:'sonder', key:'pauschaleWasser', label:'Pauschale Erneuerung der Wasserversorgung', detail:'', amount:P.pauschaleWasser});
+  if(postAktiv(m,'versicherung')) out.push({gruppe:'sonder', key:'versicherung', label:'Versicherungsgebühr', detail:'', amount:P.versicherung});
+  if(postAktiv(m,'wasserzaehler')) out.push({gruppe:'sonder', key:'wasserzaehler', label:'Wasserzählergebühr', detail:'', amount:P.wasserzaehler});
   const wv=num(m.wasserverbrauch,0);
-  if(wv>0 && P.wasserpreis>0) out.push({gruppe:'extra', label:'Wasserverbrauch', detail:`${String(wv).replace('.',',')} m³ × ${rateDE(P.wasserpreis)}`, amount:wv*P.wasserpreis});
+  if(postAktiv(m,'wasserverbrauch') && wv>0 && P.wasserpreis>0) out.push({gruppe:'extra', key:'wasserverbrauch', label:'Wasserverbrauch', detail:`${String(wv).replace('.',',')} m³ × ${rateDE(P.wasserpreis)}`, amount:wv*P.wasserpreis});
   const pf=num(m.pforteCount,0);
-  if(pf>0) out.push({gruppe:'extra', label:'Pforte nicht geöffnet', detail:`${pf} × ${moneyDE(P.pforteGebuehr)}`, amount:pf*P.pforteGebuehr});
+  if(postAktiv(m,'pforte') && pf>0) out.push({gruppe:'extra', key:'pforte', label:'Pforte nicht geöffnet', detail:`${pf} × ${moneyDE(P.pforteGebuehr)}`, amount:pf*P.pforteGebuehr});
   const fr=num(m.frostCount,0);
-  if(fr>0) out.push({gruppe:'extra', label:'Ersetzte Wasseruhr (Frostschaden)', detail:`${fr} × ${moneyDE(P.frostGebuehr)}`, amount:fr*P.frostGebuehr});
+  if(postAktiv(m,'frost') && fr>0) out.push({gruppe:'extra', key:'frost', label:'Ersetzte Wasseruhr (Frostschaden)', detail:`${fr} × ${moneyDE(P.frostGebuehr)}`, amount:fr*P.frostGebuehr});
   return out;
 }
 function memberBeitrag(m){ return Math.round(beitragPosten(m).reduce((s,p)=>s+(p.amount||0),0)*100)/100; }
@@ -739,10 +761,16 @@ function beitragTableHtml(m){
 }
 function beitragPrevHtml(m){ return `<div class="bt-title">Beitrag ${esc(sepaCfg().beitragsjahr)}</div>${beitragTableHtml(m)}`; }
 // Werte aus dem geöffneten Mitglieds-Formular (für Live-Vorschau)
+function formPostenAus(){
+  const boxes=Array.from(document.querySelectorAll('.m-post'));
+  if(!boxes.length) return null;  // Abschnitt nicht gerendert → nicht überschreiben
+  return boxes.filter(cb=>!cb.checked).map(cb=>cb.value);
+}
 function formBeitragVals(){ return {
   flaeche:val('m-flaeche'), wasserverbrauch:val('m-wasser'),
   gemeinschaftGeleistet:!!($('m-gemein')&&$('m-gemein').checked),
-  pforteCount:val('m-pforte'), frostCount:val('m-frost')
+  pforteCount:val('m-pforte'), frostCount:val('m-frost'),
+  postenAus: formPostenAus()||[]
 }; }
 function beitragPrev(){ const box=$('m-beitrag-prev'); if(box) box.innerHTML=beitragPrevHtml(formBeitragVals()); }
 function faelligDate(){ const c=sepaCfg(); if(c.faelligkeit) return c.faelligkeit; return curYear()+'-12-31'; }
@@ -1223,6 +1251,8 @@ window.GV = {
   saveRechnungsfuehrer, clearRechnungsfuehrer,
   newVerstoss, saveVerstoss, verstossMail, verstossPdf, verstossErledigt, verstossDel,
   impExp, exportMitglieder, importMitglieder, importBankdaten,
+  setFamilie:()=>{ document.querySelectorAll('.m-post').forEach(cb=>{ if(FAMILIE_AUS.includes(cb.value)) cb.checked=false; }); beitragPrev(); },
+  parzPrefill:(inp)=>{ const g=parzGroesse(inp.value); const f=$('m-flaeche'); if(g!=null && f && (f.value===''||num(f.value,0)===0)){ f.value=g; beitragPrev(); } },
   addParz:()=>$('m-parz').insertAdjacentHTML('beforeend', parzRowHtml({})),
   delParz:(btn)=>{ const r=btn.closest('.parz-row'); if(r) r.remove(); },
   addAmt:()=>$('m-amt').insertAdjacentHTML('beforeend', amtRowHtml({})),
