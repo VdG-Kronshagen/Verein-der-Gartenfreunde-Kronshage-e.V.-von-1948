@@ -527,11 +527,21 @@ function viewVerteiler(){
         <button class="x" title="Löschen" onclick="GV.askDelListe('${v.id}')">✕</button>
       </div>
     </div>`; }).join('') || `<div class="muted">${_q?'Keine Treffer.':'Noch keine Verteiler. Lege einen an und füge Adressen hinzu.'}</div>`;
+  const allAddr=normEmails(lists().flatMap(v=>normEmails(v.emails)));
   return `<div class="sec">
-    <h2><span>✉️ E-Mail-Verteiler (${lists().length})</span><button class="btn primary" onclick="GV.newListe()">＋ Verteiler</button></h2>
-    <div class="muted" style="margin-bottom:10px">„Mail (BCC)" öffnet dein Mailprogramm mit allen Adressen im BCC – die Empfänger sehen einander nicht.</div>
+    <h2><span>✉️ E-Mail-Verteiler (${lists().length})</span>
+      <span style="display:flex;gap:8px;flex-wrap:wrap">
+        ${allAddr.length?`<button class="btn" title="BCC an alle Adressen aus allen Verteilern (${allAddr.length})" onclick="GV.verteilerMailAlle()">✉️ Mail an alle</button>`:''}
+        <button class="btn primary" onclick="GV.newListe()">＋ Verteiler</button>
+      </span></h2>
+    <div class="muted" style="margin-bottom:10px">„Mail (BCC)" öffnet dein Mailprogramm mit allen Adressen im BCC – die Empfänger sehen einander nicht. „Mail an alle" fasst alle Verteiler zusammen (ohne Doppelte).</div>
     <div class="list">${cards}</div>
   </div>`;
+}
+function verteilerMailAlle(){
+  const all=normEmails(lists().flatMap(v=>normEmails(v.emails)));
+  if(!all.length){ toast('Keine Adressen in den Verteilern.','err'); return; }
+  openMail(all,'bcc');
 }
 function listeForm(v){
   const withMail=members().filter(m=>m.email).sort((a,b)=>String(a.name).localeCompare(String(b.name),'de',{sensitivity:'base'}));
@@ -1217,7 +1227,7 @@ window.GV = {
   delParz:(btn)=>{ const r=btn.closest('.parz-row'); if(r) r.remove(); },
   addAmt:()=>$('m-amt').insertAdjacentHTML('beforeend', amtRowHtml({})),
   delAmt:(btn)=>{ const r=btn.closest('.amt-item'); if(r) r.remove(); },
-  newListe, editListe, saveListeForm, askDelListe, listeAddMember, verteilerMail, verteilerCopy
+  newListe, editListe, saveListeForm, askDelListe, listeAddMember, verteilerMail, verteilerCopy, verteilerMailAlle
 };
 
 // Modal-Hintergrund schließt bei Klick daneben
