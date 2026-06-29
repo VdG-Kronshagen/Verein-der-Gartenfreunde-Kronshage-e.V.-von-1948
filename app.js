@@ -710,6 +710,11 @@ function sepaCfg(){ const c=(_cache.meta&&_cache.meta.sepaCfg)||{}; const P=c.po
     glaeubigerId:c.glaeubigerId||'', vereinName:String(c.vereinName||'').replace('1948','1946'), iban:c.iban||'', bic:c.bic||'',
     faelligkeit:c.faelligkeit||'', verwendung:c.verwendung||'Mitgliedsbeitrag',
     beitragsjahr:(c.beitragsjahr!=null&&c.beitragsjahr!=='')?c.beitragsjahr:new Date().getFullYear(),
+    // Absender für den Briefkopf der Rechnung/Abrechnung (frei änderbar)
+    absenderName:(c.absenderName!=null?c.absenderName:'Verein der Gartenfreunde e.V. von 1946 Kronshagen'),
+    absenderZusatz:(c.absenderZusatz!=null?c.absenderZusatz:'z.Hd. Moritz Kriese'),
+    absenderStrasse:(c.absenderStrasse!=null?c.absenderStrasse:'Hansastraße 62'),
+    absenderOrt:(c.absenderOrt!=null?c.absenderOrt:'24118 Kiel'),
     posten:po
   };
 }
@@ -815,6 +820,14 @@ function viewBeitraege(){
       <div class="field" style="flex:2;min-width:180px"><label>Verwendungszweck</label><input id="cfg-zweck" value="${esc(c.verwendung)}" placeholder="Mitgliedsbeitrag"></div>
     </div>
 
+    <div class="sec-head" style="margin-top:14px">✉️ Absender (Briefkopf der Rechnung)</div>
+    <div class="field"><label>Absender – Name</label><input id="cfg-abs-name" value="${esc(c.absenderName)}"></div>
+    <div class="field"><label>Zusatz (z. B. z.Hd.)</label><input id="cfg-abs-zusatz" value="${esc(c.absenderZusatz)}"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <div class="field" style="flex:2;min-width:160px"><label>Straße</label><input id="cfg-abs-str" value="${esc(c.absenderStrasse)}"></div>
+      <div class="field" style="flex:1;min-width:140px"><label>PLZ / Ort</label><input id="cfg-abs-ort" value="${esc(c.absenderOrt)}"></div>
+    </div>
+
     <div class="sec-head" style="margin-top:14px">💶 Beitrags-Posten (${esc(c.beitragsjahr)})</div>
     <div class="muted" style="margin-bottom:6px">Pflichtbeiträge</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -916,6 +929,8 @@ function saveSepaCfg(){
     iban:val('cfg-iban').replace(/\s+/g,''), bic:val('cfg-bic').replace(/\s+/g,'').toUpperCase(),
     faelligkeit:val('cfg-faellig'), verwendung:val('cfg-zweck').trim()||'Mitgliedsbeitrag',
     beitragsjahr:(val('cfg-jahr')!==''?parseInt(val('cfg-jahr'),10):curYear()),
+    absenderName:val('cfg-abs-name'), absenderZusatz:val('cfg-abs-zusatz'),
+    absenderStrasse:val('cfg-abs-str'), absenderOrt:val('cfg-abs-ort'),
     posten:{
       pachtProM2:num(val('cfg-pacht'),POSTEN_DEF.pachtProM2),
       jahresbeitrag:num(val('cfg-jahr-betrag'),POSTEN_DEF.jahresbeitrag),
@@ -1058,10 +1073,18 @@ function beitragPdf(id){ const m=_cache.mitglieder[id]; if(!m) return; const c=s
   const rowHtml=p=>`<tr><td>${esc(p.label)}${p.detail?` <span class="det">${esc(p.detail)}</span>`:''}</td><td class="amt">${esc(moneyDE(p.amount))}</td></tr>`;
   const pflicht=grp('pflicht'), sonder=grp('sonder'), extra=grp('extra');
   const heute=fmtDateShort(new Date().toISOString().slice(0,10));
-  const html=`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Beitragsabrechnung ${esc(c.beitragsjahr)} – ${esc(m.name||'')}</title>
+  const ortName=String(c.absenderOrt||'').replace(/^\d+\s*/,'')||'';
+  const absLine=[c.absenderName,c.absenderZusatz,c.absenderStrasse,c.absenderOrt].map(x=>String(x||'').trim()).filter(Boolean).join(' · ');
+  const html=`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Rechnung Mitgliedsbeitrag ${esc(c.beitragsjahr)} – ${esc(m.name||'')}</title>
    <style>body{font-family:Arial,Helvetica,sans-serif;color:#222;max-width:680px;margin:40px auto;padding:0 24px;line-height:1.5}
-   .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #2f9e3f;padding-bottom:8px;margin-bottom:26px}
-   .head h1{color:#2f9e3f;font-size:20px;margin:0}.addr{margin:20px 0;white-space:pre-line}
+   .bk{text-align:right;margin-bottom:30px}
+   .bk .vn{color:#2f9e3f;font-weight:700;font-size:15px}
+   .bk .va{font-size:12px;color:#444;line-height:1.45}
+   .abs-klein{font-size:10px;color:#666;border-bottom:.5px solid #999;padding-bottom:2px;margin-bottom:8px}
+   .empf{font-size:14px;line-height:1.55;white-space:pre-line;margin-bottom:24px}
+   .datum{text-align:right;font-size:13px;margin-bottom:20px}
+   .betreff{font-weight:700;font-size:15px;margin-bottom:14px}
+   p{margin:10px 0}
    h2{font-size:15px;margin:22px 0 6px}
    table{width:100%;border-collapse:collapse}td{padding:4px 0;border-bottom:1px solid #eee;vertical-align:top}
    td.amt{text-align:right;white-space:nowrap;width:120px}.det{color:#777;font-size:12px}
@@ -1070,10 +1093,15 @@ function beitragPdf(id){ const m=_cache.mitglieder[id]; if(!m) return; const c=s
    .note{margin-top:22px;font-size:12px;color:#555;border-top:1px solid #eee;padding-top:10px}
    @media print{body{margin:0}.noprint{display:none}}</style></head>
    <body>
-    <div class="head"><h1>${esc(c.vereinName||'Verein der Gartenfreunde Kronshagen e.V. von 1946')}</h1><div style="text-align:right;font-size:13px;color:#555">${esc(heute)}</div></div>
-    <div class="addr">${esc(m.name||'')}${m.adresse?'\n'+esc(m.adresse):''}</div>
-    <h1 style="font-size:18px;color:#222">Beitragsabrechnung ${esc(c.beitragsjahr)}</h1>
-    <h2>Pflichtbeiträge</h2>
+    <div class="bk"><div class="vn">${esc(c.absenderName||'Verein der Gartenfreunde e.V. von 1946 Kronshagen')}</div>
+      <div class="va">${[c.absenderZusatz,c.absenderStrasse,c.absenderOrt].map(x=>esc(String(x||'').trim())).filter(Boolean).join('<br>')}</div></div>
+    <div class="abs-klein">${esc(absLine)}</div>
+    <div class="empf">${esc(m.name||'')}${m.adresse?'\n'+esc(m.adresse):''}</div>
+    <div class="datum">${esc(ortName?ortName+', den ':'')}${esc(heute)}</div>
+    <div class="betreff">Rechnung Mitgliedsbeitrag ${esc(c.beitragsjahr)}</div>
+    <p>Sehr geehrte/r ${esc(m.name||'Gartenfreund/in')},</p>
+    <p>wie vereinbart erhalten Sie Ihre Rechnung für den Jahresbeitrag ${esc(c.beitragsjahr)}. Bitte prüfen Sie die Rechnung – sollten Sie Anmerkungen oder Fragen haben, melden Sie sich bitte.</p>
+    <h2>Aufstellung Jahresbeitrag ${esc(c.beitragsjahr)}</h2>
     <table>${pflicht.map(rowHtml).join('')}</table>
     <h2>Sonderzahlung</h2>
     <table>${sonder.map(rowHtml).join('')}<tr class="sub"><td>Summe der Sonderzahlung</td><td class="amt">${esc(moneyDE(sumOf(sonder)))}</td></tr></table>
@@ -1081,6 +1109,7 @@ function beitragPdf(id){ const m=_cache.mitglieder[id]; if(!m) return; const c=s
     <table style="margin-top:14px"><tr class="total"><td>Gesamtbeitrag ${esc(c.beitragsjahr)}</td><td class="amt">${esc(moneyDE(memberBeitrag(m)))}</td></tr></table>
     ${(m.sepaAktiv&&m.iban)?`<div class="note">Der Betrag wird per SEPA-Lastschrift von Ihrem Konto (IBAN ${esc(m.iban)}) eingezogen${c.faelligkeit?' zum '+fmtDateShort(c.faelligkeit):''}.</div>`:`<div class="note">Bitte überweisen Sie den Gesamtbetrag${c.faelligkeit?' bis zum '+fmtDateShort(c.faelligkeit):''} auf das Vereinskonto${c.iban?' (IBAN '+esc(c.iban)+')':''}. Verwendungszweck: ${esc(c.verwendung)} ${esc(c.beitragsjahr)} – ${esc(m.name||'')}.</div>`}
     <div class="note">Hinweis: Gartenfreunde, die ihre Gartenpforten zum Aus-/Einbau der Wasserzähler nicht geöffnet hatten, zahlen je angekündigtem Termin ${esc(moneyDE(c.posten.pforteGebuehr))} für die Extraleistung des Wasserwarts. Für jede infolge eines Frostschadens ersetzte Wasseruhr werden ${esc(moneyDE(c.posten.frostGebuehr))} berechnet. Hinzu kommt der tatsächliche Wasserverbrauch.</div>
+    <p style="margin-top:26px">Viele liebe Grüße<br>${esc(c.absenderName||'')}</p>
     <div class="noprint" style="margin-top:26px"><button onclick="window.print()" style="padding:10px 18px;font-size:15px;background:#2f9e3f;color:#fff;border:0;border-radius:8px;cursor:pointer">🖨️ Drucken / als PDF speichern</button></div>
    </body></html>`;
   const w=window.open('','_blank'); if(!w){ toast('Bitte Popups erlauben.','err'); return; }
