@@ -401,7 +401,7 @@ function memberForm(m){
    </div>
    <div class="field"><label>E-Mail</label><input id="m-email" type="email" value="${esc(m.email||'')}"></div>
    <div class="field"><label>Telefon</label><input id="m-tel" value="${esc(m.tel||'')}"></div>
-   <div class="field"><label>Adresse</label><input id="m-adresse" value="${esc(m.adresse||'')}"></div>
+   <div class="field"><label>Adresse <span style="font-weight:400;text-transform:none">(mehrzeilig – mit Enter neue Zeile)</span></label><textarea id="m-adresse" rows="3" placeholder="Straße Nr.&#10;PLZ Ort">${esc(m.adresse||'')}</textarea></div>
 
    <div class="sec-head">🌳 Gartenparzellen (Verlauf)</div>
    <div id="m-parz">${(Array.isArray(m.parzellen)?m.parzellen:[]).map(parzRowHtml).join('')}</div>
@@ -463,7 +463,7 @@ function memberDetailHtml(m){
    ${det('Eintrittsdatum', m.eintrittsdatum?fmtDateShort(m.eintrittsdatum):'')}
    ${det('E-Mail', m.email?`<a href="${mailHref(m.email)}">${esc(m.email)}</a>`:'')}
    ${det('Telefon', m.tel?`<a href="${telHref(m.tel)}">${esc(m.tel)}</a>`:'')}
-   ${det('Adresse', m.adresse?esc(m.adresse):'')}
+   ${det('Adresse', m.adresse?`<span style="white-space:pre-line">${esc(m.adresse)}</span>`:'')}
    ${det('Notiz', m.note?esc(m.note):'')}
    ${det('🌳 Gartenparzellen (Verlauf)', parz)}
    ${det('🏅 Ämter (Verlauf)', aem)}
@@ -1074,13 +1074,14 @@ function beitragPdf(id){ const m=_cache.mitglieder[id]; if(!m) return; const c=s
   const pflicht=grp('pflicht'), sonder=grp('sonder'), extra=grp('extra');
   const heute=fmtDateShort(new Date().toISOString().slice(0,10));
   const ortName=String(c.absenderOrt||'').replace(/^\d+\s*/,'')||'';
-  const absLine=[c.absenderName,c.absenderZusatz,c.absenderStrasse,c.absenderOrt].map(x=>String(x||'').trim()).filter(Boolean).join(' · ');
+  const absLine=[c.absenderName,c.absenderStrasse,c.absenderOrt].map(x=>String(x||'').trim()).filter(Boolean).join(' · ');
   const html=`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Rechnung Mitgliedsbeitrag ${esc(c.beitragsjahr)} – ${esc(m.name||'')}</title>
    <style>body{font-family:Arial,Helvetica,sans-serif;color:#222;max-width:680px;margin:40px auto;padding:0 24px;line-height:1.5}
    .bk{text-align:right;margin-bottom:30px}
    .bk .vn{color:#2f9e3f;font-weight:700;font-size:15px}
    .bk .va{font-size:12px;color:#444;line-height:1.45}
-   .abs-klein{font-size:10px;color:#666;border-bottom:.5px solid #999;padding-bottom:2px;margin-bottom:8px}
+   .abs-klein{font-size:10px;color:#666;border-bottom:.5px solid #999;padding-bottom:2px;margin-bottom:3px}
+   .abs-zhd{font-size:12px;font-weight:700;color:#222;margin-bottom:24px}
    .empf{font-size:14px;line-height:1.55;white-space:pre-line;margin-bottom:24px}
    .datum{text-align:right;font-size:13px;margin-bottom:20px}
    .betreff{font-weight:700;font-size:15px;margin-bottom:14px}
@@ -1096,6 +1097,7 @@ function beitragPdf(id){ const m=_cache.mitglieder[id]; if(!m) return; const c=s
     <div class="bk"><div class="vn">${esc(c.absenderName||'Verein der Gartenfreunde e.V. von 1946 Kronshagen')}</div>
       <div class="va">${[c.absenderZusatz,c.absenderStrasse,c.absenderOrt].map(x=>esc(String(x||'').trim())).filter(Boolean).join('<br>')}</div></div>
     <div class="abs-klein">${esc(absLine)}</div>
+    ${c.absenderZusatz?`<div class="abs-zhd">${esc(c.absenderZusatz)}</div>`:''}
     <div class="empf">${esc(m.name||'')}${m.adresse?'\n'+esc(m.adresse):''}</div>
     <div class="datum">${esc(ortName?ortName+', den ':'')}${esc(heute)}</div>
     <div class="betreff">Rechnung Mitgliedsbeitrag ${esc(c.beitragsjahr)}</div>
