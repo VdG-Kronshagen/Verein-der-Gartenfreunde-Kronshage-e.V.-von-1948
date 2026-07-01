@@ -1159,6 +1159,8 @@ function rowMitgliednr(row){
   if(row.mitgliednr!=null && String(row.mitgliednr).trim()) return String(row.mitgliednr).trim();
   return '';
 }
+// Erste nicht-leere Zelle, deren Spaltenüberschrift zum Muster passt (tolerant ggü. Bank-CSV-Namen)
+function rowGet(row, re){ for(const k of Object.keys(row)){ if(re.test(k)){ const v=String(row[k]==null?'':row[k]).trim(); if(v!=='') return v; } } return ''; }
 function memberToRow(m){
   const row={};
   MEMBER_COLS.forEach(k=>{
@@ -1182,7 +1184,7 @@ function impExp(){
    <label class="btn" style="cursor:pointer">📄 Datei wählen…<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="GV.importMitglieder(this)"></label>
 
    <div class="sec-head" style="margin-top:18px">🏦 Bankdaten importieren</div>
-   <div class="muted" style="margin-bottom:8px">Excel/CSV mit <b>Mitgliednummer</b> (oder Name/id) und <b>iban</b>, optional <b>bic, kontoinhaber, mandatsref, mandatsdatum</b>. Die Bank-CSV mit der Mitgliednummer in der ersten Spalte passt direkt. Trifft auf bestehende Mitglieder (bevorzugt per Mitgliednummer); setzt nur die Bankfelder, alles andere bleibt erhalten. Mit IBAN wird das SEPA-Mandat aktiviert.</div>
+   <div class="muted" style="margin-bottom:8px">Passt direkt zur Bank-CSV mit den Spalten <b>Mitglieds Nr · Vorname · Nachname · Strasse · BIC Nr · IBAN Nr</b> (Reihenfolge egal, Spaltennamen werden erkannt). Zuordnung bevorzugt über die <b>Mitgliednummer</b>, sonst Vorname + Nachname. Gesetzt werden IBAN, BIC und die <b>Adresse (überschreibt die bestehende!)</b>; mit IBAN wird das SEPA-Mandat aktiviert. Nicht zugeordnete Zeilen werden gemeldet.</div>
    <label class="btn" style="cursor:pointer">🏦 Bankdaten-Datei wählen…<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="GV.importBankdaten(this)"></label>
 
    <div id="ie-status" class="muted" style="margin-top:14px"></div>
@@ -1258,7 +1260,7 @@ async function importMitglieder(input){
 }
 async function importBankdaten(input){
   const file=input&&input.files&&input.files[0]; if(!file) return;
-  if(!confirm('Bankdaten-Import starten? Bei passenden Mitgliedern werden IBAN/BIC/Mandat gesetzt.')){ input.value=''; return; }
+  if(!confirm('Bankdaten-Import starten? Bei passenden Mitgliedern werden IBAN/BIC gesetzt und die Adresse (Strasse) überschrieben.')){ input.value=''; return; }
   ieStatus('Datei wird gelesen …');
   try{
     const XLSX=await loadXLSX();
@@ -1266,15 +1268,28 @@ async function importBankdaten(input){
     const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
     let set=0; const unmatched=[];
     rows.forEach(row=>{
-      const m=findMemberByNameOrId(row);
-      if(!m){ const nm=String(row.name||row.id||'').trim(); if(nm) unmatched.push(nm); return; }
+      // Spalten tolerant lesen (Bank-CSV: Mitglieds Nr, Vorname, Nachname, Strasse, BIC Nr, IBAN Nr)
+      const iban=rowGet(row,/iban/i);
+      const bic=rowGet(row,/bic/i);
+      const strasse=rowGet(row,/stra[sß]e|adresse/i);
+      const vorname=rowGet(row,/vorname/i);
+      const nachname=rowGet(row,/nachname/i);
+      const kontoinhaber=rowGet(row,/kontoinhaber/i);
+      const mandatsref=rowGet(row,/mandatsref|mandat.?ref/i);
+      const mandatsdatum=rowGet(row,/mandat.?(datum|vom)/i);
+      const fullName=[vorname,nachname].filter(Boolean).join(' ').trim();
+      // Zuordnung: bevorzugt Mitgliednummer, sonst Vorname+Nachname
+      let m=findMemberByNameOrId(row);
+      if(!m && fullName){ const fn=fullName.toLowerCase(); m=members().find(x=>String(x.name||'').toLowerCase().trim()===fn); }
+      if(!m){ const who=fullName||rowMitgliednr(row)||''; if(who) unmatched.push(who); return; }
       const rec=Object.assign({}, m);
       let any=false;
-      if(String(row.iban||'').trim()){ rec.iban=normIban(row.iban); rec.sepaAktiv=true; any=true; }
-      if(String(row.bic||'').trim()){ rec.bic=String(row.bic).replace(/\s+/g,'').toUpperCase(); any=true; }
-      if(String(row.kontoinhaber||'').trim()){ rec.kontoinhaber=String(row.kontoinhaber).trim(); any=true; }
-      if(String(row.mandatsref||'').trim()){ rec.mandatsref=String(row.mandatsref).trim(); any=true; }
-      if(String(row.mandatsdatum||'').trim()){ rec.mandatsdatum=xlDate(row.mandatsdatum); any=true; }
+      if(iban){ rec.iban=normIban(iban); rec.sepaAktiv=true; any=true; }
+      if(bic){ rec.bic=bic.replace(/\s+/g,'').toUpperCase(); any=true; }
+      if(strasse){ rec.adresse=strasse; any=true; }                 // bestehende Adresse überschreiben
+      if(kontoinhaber){ rec.kontoinhaber=kontoinhaber; any=true; }
+      if(mandatsref){ rec.mandatsref=mandatsref; any=true; }
+      if(mandatsdatum){ rec.mandatsdatum=xlDate(mandatsdatum); any=true; }
       if(any){ saveMember(rec); set++; }
     });
     input.value=''; render();
